@@ -1,16 +1,18 @@
 import pandas as pd
 import pymysql
 
+import os
+
 # =========================
 # KONFIGURASI
 # =========================
 file_excel = "data_toko_online.xlsx"
 
 db_config = {
-    "host": "localhost",
-    "user": "root",
-    "password": "",
-    "database": "db_cabai",  # ganti sesuai nama database kamu
+    "host": os.getenv("DB_HOST", "localhost"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD", ""),
+    "database": os.getenv("DB_NAME", "db_cabai"),
     "charset": "utf8mb4"
 }
 
@@ -91,7 +93,7 @@ cursor = connection.cursor()
 
 sql = """
 INSERT INTO toko_online
-(nama_toko, platform, nama_produk, jenis_cabai, harga, satuan, lokasi, rating, link_toko, gambar_produk)
+(nama_toko, platform, nama_produk, jenis_cabai, harga, satuan, lokasi, rating, link_toko, gambar_toko)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 

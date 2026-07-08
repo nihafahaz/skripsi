@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # 1. Database MySQL
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_database
+    restart: always
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: "db_cabai"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mysql-init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. MLflow Tracking Server
+  mlflow:
+    image: python:3.10-slim
+    container_name: mlflow_server
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      sh -c "pip install mlflow pysqlite3 &&
+             mlflow server --backend-store-uri sqlite:////mlflow/mlflow.db --default-artifact-root /mlflow/artifacts --host 0.0.0.0 --port 5000"
+
+  # 3. FastAPI Backend
+  backend:
+    build: .
+    container_name: fastapi_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: "mysql"
+      DB_USER: "root"
+      DB_PASSWORD: ""
+      DB_NAME: "db_cabai"
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    volumes:
+      - shared_data:/shared
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # 4. BI PIHPS Scraper
+  scraper:
+    build: ./scraper
+    container_name: pihps_scraper
+    restart: "no" # Jalankan sekali lalu keluar
+    environment:
+      DB_HOST: "mysql"
+      DB_USER: "root"
+      DB_PASSWORD: ""
+      DB_NAME: "db_cabai"
+    volumes:
+      - shared_data:/shared
+    depends_on:
+      mysql:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+volumes:
+  db_data:
+    driver: local
+  mlflow_data:
+    driver: local
+  shared_data:
+    driver: local

@@ -5,9 +5,13 @@ from sqlalchemy import create_engine
 # folder tempat file clean kamu
 folder_clean = "clean_data"
 
-# koneksi MySQL
-# format: mysql+pymysql://username:password@host/database
-engine = create_engine("mysql+pymysql://root:@localhost/db_cabai")
+# koneksi MySQL dari env
+db_host = os.getenv("DB_HOST", "localhost")
+db_user = os.getenv("DB_USER", "root")
+db_pass = os.getenv("DB_PASSWORD", "")
+db_name = os.getenv("DB_NAME", "db_cabai")
+
+engine = create_engine(f"mysql+pymysql://{db_user}:{db_pass}@{db_host}/{db_name}")
 
 with engine.begin() as conn:
     conn.exec_driver_sql("TRUNCATE TABLE data_harga_clean")

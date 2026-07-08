@@ -246,7 +246,7 @@ def toko_online():
             lokasi,
             rating,
             link_toko,
-            gambar_produk
+            gambar_toko AS gambar_produk
         FROM toko_online
         """
 
