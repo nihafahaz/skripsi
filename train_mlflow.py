@@ -5,6 +5,7 @@ import mlflow
 import mlflow.tensorflow
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Input
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import joblib
@@ -41,7 +42,8 @@ EPOCHS = 150
 BATCH_SIZE = 32
 LSTM_UNITS = 32
 SPLIT_RATIO = 0.8
-LAG = 1
+# LAG = 1
+LAG = 7
 
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
@@ -210,11 +212,18 @@ def main():
 
         model.compile(loss='mse', optimizer='adam')
 
+        early_stopping = EarlyStopping(
+            monitor='val_loss',
+            patience=25,
+            restore_best_weights=True
+        )
+
         history = model.fit(
             final_train_X, final_train_y,
             epochs=EPOCHS,
             batch_size=BATCH_SIZE,
             validation_data=(final_test_X, final_test_y),
+            callbacks=[early_stopping],
             verbose=1,
             shuffle=False
         )

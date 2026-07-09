@@ -21,7 +21,9 @@ RUN pip install --no-cache-dir \
     numpy \
     reportlab \
     joblib \
-    python-dotenv
+    python-dotenv \
+    mlflow \
+    tensorboard
 
 # Copy application files
 COPY . .

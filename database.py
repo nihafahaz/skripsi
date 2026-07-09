@@ -1,15 +1,22 @@
 import os
-import mysql.connector
+import pymysql
+import pymysql.cursors
 from dotenv import load_dotenv
 
 load_dotenv()
 
+class CompatibleConnection(pymysql.connections.Connection):
+    def cursor(self, cursor=None, dictionary=False):
+        if dictionary:
+            return super().cursor(pymysql.cursors.DictCursor)
+        return super().cursor(cursor)
+
 def get_db_connection():
-    connection = mysql.connector.connect(
+    connection = CompatibleConnection(
         host=os.getenv("DB_HOST", "localhost"),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_NAME", "db_cabai"),
+        database=os.getenv("DB_NAME", "db_cabai")
     )
 
     return connection

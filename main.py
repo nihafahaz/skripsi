@@ -16,8 +16,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 import tempfile
 
 app = FastAPI()
-LAG = 1
-MODEL_CUTOFF_DATE = "2026-06-21"
+# LAG = 1
+LAG = 7
 
 PROVINSI_LIST = sorted([
     'Aceh', 'Bali', 'Banten', 'Bengkulu', 'DI Yogyakarta', 'DKI Jakarta',
@@ -93,7 +93,7 @@ def harga(
     
 def buat_model_lstm():
     model = Sequential()
-    model.add(LSTM(32, input_shape=(1, 39)))
+    model.add(LSTM(32, input_shape=(1, LAG + 38)))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(loss="mse", optimizer="adam")
     return model
@@ -131,13 +131,14 @@ def proses_prediksi(request: PredictRequest):
             FROM data_harga_clean
             WHERE provinsi = %s 
             AND jenis_cabai = %s
-            AND tanggal <= %s
             ORDER BY tanggal DESC
             LIMIT %s
         """
 
-        cursor.execute(query, (request.provinsi, request.jenis_cabai, MODEL_CUTOFF_DATE, LAG))
+        cursor.execute(query, (request.provinsi, request.jenis_cabai, LAG))
         data_historis = cursor.fetchall()
+        cursor.close()
+        connection.close()
 
         if len(data_historis) < LAG:
             return {
@@ -170,10 +171,10 @@ def proses_prediksi(request: PredictRequest):
 
         ohe_features = np.concatenate([prov_ohe, chili_ohe])
 
-        # Bentuk initial feature vector size (1, 1, 39)
-        current_seq_features = np.zeros((1, 1, 39))
-        current_seq_features[0, 0, 0] = scaled_sequence[0][0]
-        current_seq_features[0, 0, 1:] = ohe_features
+        # Bentuk initial feature vector size (1, 1, LAG + 38)
+        current_seq_features = np.zeros((1, 1, LAG + len(ohe_features)))
+        current_seq_features[0, 0, :LAG] = scaled_sequence.flatten()
+        current_seq_features[0, 0, LAG:] = ohe_features
 
         hasil_prediksi = []
 
@@ -190,55 +191,12 @@ def proses_prediksi(request: PredictRequest):
                 "harga": pred_harga
             })
 
-            # Update feature vector untuk prediksi hari berikutnya
-            next_seq_features = np.zeros((1, 1, 39))
-            next_seq_features[0, 0, 0] = pred_scaled[0][0]
-            next_seq_features[0, 0, 1:] = ohe_features
+            # Update feature vector untuk prediksi hari berikutnya (sliding window)
+            next_seq_features = np.zeros((1, 1, LAG + len(ohe_features)))
+            next_seq_features[0, 0, :LAG-1] = current_seq_features[0, 0, 1:LAG]
+            next_seq_features[0, 0, LAG-1] = pred_scaled[0][0]
+            next_seq_features[0, 0, LAG:] = ohe_features
             current_seq_features = next_seq_features
-
-        tanggal_mulai = tanggal_terakhir + timedelta(days=1)
-        tanggal_selesai = tanggal_terakhir + timedelta(days=request.durasi)
-
-        query_aktual = """
-        SELECT tanggal, harga
-        FROM data_harga_clean
-        WHERE provinsi = %s
-        AND jenis_cabai = %s
-        AND tanggal BETWEEN %s AND %s
-        ORDER BY tanggal ASC
-        """
-
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute(
-            query_aktual,
-            (
-                request.provinsi,
-                request.jenis_cabai,
-                tanggal_mulai,
-                tanggal_selesai
-            )
-        )
-
-        data_aktual = cursor.fetchall()
-
-        cursor.close()
-        connection.close()
-
-        aktual_dict = {
-            item["tanggal"].strftime("%Y-%m-%d"): item["harga"]
-            for item in data_aktual
-        }
-
-        data_aktual_final = []
-
-        for prediksi in hasil_prediksi:
-            tanggal = prediksi["tanggal"]
-
-            data_aktual_final.append({
-                "tanggal": tanggal,
-                "harga": aktual_dict.get(tanggal)
-            })
 
         return {
             "status": "success",
@@ -247,8 +205,7 @@ def proses_prediksi(request: PredictRequest):
             "durasi": request.durasi,
             "harga_terakhir": harga_terakhir,
             "tanggal_terakhir": tanggal_terakhir.strftime("%Y-%m-%d"),
-            "data": hasil_prediksi,
-            "data_aktual": data_aktual_final
+            "data": hasil_prediksi
         }
 
     except Exception as e:
