@@ -6,7 +6,7 @@ from database import get_db_connection
 import os
 import joblib
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Input
 import numpy as np
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib import colors
@@ -18,6 +18,25 @@ import tempfile
 app = FastAPI()
 LAG = 1
 MODEL_CUTOFF_DATE = "2026-06-21"
+
+PROVINSI_LIST = sorted([
+    'Aceh', 'Bali', 'Banten', 'Bengkulu', 'DI Yogyakarta', 'DKI Jakarta',
+    'Gorontalo', 'Jambi', 'Jawa Barat', 'Jawa Tengah', 'Jawa Timur',
+    'Kalimantan Barat', 'Kalimantan Selatan', 'Kalimantan Tengah',
+    'Kalimantan Timur', 'Kalimantan Utara', 'Kepulauan Bangka Belitung',
+    'Kepulauan Riau', 'Lampung', 'Maluku', 'Maluku Utara',
+    'Nusa Tenggara Barat', 'Nusa Tenggara Timur', 'Papua', 'Papua Barat',
+    'Riau', 'Sulawesi Barat', 'Sulawesi Selatan', 'Sulawesi Tengah',
+    'Sulawesi Tenggara', 'Sulawesi Utara', 'Sumatera Barat',
+    'Sumatera Selatan', 'Sumatera Utara'
+])
+
+JENIS_CABAI_LIST = sorted([
+    'Cabai Merah Besar',
+    'Cabai Merah Keriting',
+    'Cabai Rawit Merah',
+    'Cabai Rawit Hijau'
+])
 
 class PredictRequest(BaseModel):
     provinsi: str
@@ -74,16 +93,14 @@ def harga(
     
 def buat_model_lstm():
     model = Sequential()
-    model.add(LSTM(32, input_shape=(1, 1)))
+    model.add(LSTM(32, input_shape=(1, 39)))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(loss="mse", optimizer="adam")
     return model
 
-def load_model_dan_scaler(provinsi, jenis_cabai):
-    nama_file = f"{provinsi}_{jenis_cabai}"
-
-    weights_path = f"models/{nama_file}.weights.h5"
-    scaler_path = f"scalers/{nama_file}_scaler.save"
+def load_model_dan_scaler():
+    weights_path = "models/global_lstm.weights.h5"
+    scaler_path = "scalers/global_scaler.save"
 
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"Weights tidak ditemukan: {weights_path}")
@@ -100,6 +117,12 @@ def load_model_dan_scaler(provinsi, jenis_cabai):
 
 def proses_prediksi(request: PredictRequest):
     try:
+        if request.provinsi not in PROVINSI_LIST or request.jenis_cabai not in JENIS_CABAI_LIST:
+            return {
+                "status": "error",
+                "message": f"Provinsi atau Jenis Cabai tidak terdaftar."
+            }
+
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
@@ -113,7 +136,7 @@ def proses_prediksi(request: PredictRequest):
             LIMIT %s
         """
 
-        cursor.execute(query, (request.provinsi, request.jenis_cabai, MODEL_CUTOFF_DATE,LAG))
+        cursor.execute(query, (request.provinsi, request.jenis_cabai, MODEL_CUTOFF_DATE, LAG))
         data_historis = cursor.fetchall()
 
         if len(data_historis) < LAG:
@@ -122,10 +145,7 @@ def proses_prediksi(request: PredictRequest):
                 "message": f"Data historis kurang. Butuh minimal {LAG} data."
             }
 
-        model, scaler = load_model_dan_scaler(
-            request.provinsi,
-            request.jenis_cabai
-        )
+        model, scaler = load_model_dan_scaler()
 
         data_historis = list(reversed(data_historis))
 
@@ -138,13 +158,27 @@ def proses_prediksi(request: PredictRequest):
 
         scaled_sequence = scaler.transform(harga_sequence)
 
+        # OHE Mapping
+        prov_idx = PROVINSI_LIST.index(request.provinsi)
+        chili_idx = JENIS_CABAI_LIST.index(request.jenis_cabai)
+
+        prov_ohe = np.zeros(len(PROVINSI_LIST))
+        prov_ohe[prov_idx] = 1.0
+
+        chili_ohe = np.zeros(len(JENIS_CABAI_LIST))
+        chili_ohe[chili_idx] = 1.0
+
+        ohe_features = np.concatenate([prov_ohe, chili_ohe])
+
+        # Bentuk initial feature vector size (1, 1, 39)
+        current_seq_features = np.zeros((1, 1, 39))
+        current_seq_features[0, 0, 0] = scaled_sequence[0][0]
+        current_seq_features[0, 0, 1:] = ohe_features
+
         hasil_prediksi = []
 
-        current_sequence = scaled_sequence[-1:].reshape(1, 1, 1)
-        # current_sequence = scaled_sequence[-LAG:].reshape(1, LAG, 1)
-
         for i in range(request.durasi):
-            pred_scaled = model.predict(current_sequence, verbose=0)
+            pred_scaled = model.predict(current_seq_features, verbose=0)
 
             pred_harga = scaler.inverse_transform(pred_scaled)[0][0]
             pred_harga = int(round(pred_harga))
@@ -156,12 +190,11 @@ def proses_prediksi(request: PredictRequest):
                 "harga": pred_harga
             })
 
-            pred_scaled_reshaped = pred_scaled.reshape(1, 1, 1)
-
-            current_sequence = np.concatenate(
-                (current_sequence[:, 1:, :], pred_scaled_reshaped),
-                axis=1
-            )
+            # Update feature vector untuk prediksi hari berikutnya
+            next_seq_features = np.zeros((1, 1, 39))
+            next_seq_features[0, 0, 0] = pred_scaled[0][0]
+            next_seq_features[0, 0, 1:] = ohe_features
+            current_seq_features = next_seq_features
 
         tanggal_mulai = tanggal_terakhir + timedelta(days=1)
         tanggal_selesai = tanggal_terakhir + timedelta(days=request.durasi)

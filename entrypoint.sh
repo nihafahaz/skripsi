@@ -31,6 +31,16 @@ if [ "$TABLE_COUNT" -eq "0" ]; then
     python import_clean_to_mysql.py
     python import_toko.py
     echo "Database seeding completed."
+
+    # Generate data sintesis untuk kombinasi provinsi/jenis cabai yang kosong
+    echo "Running data synthesis for empty combinations..."
+    python data_synthesis.py
+
+    # Preprocessing: interpolasi missing value, pembulatan, simpan ke clean_data
+    echo "Running preprocessing pipeline..."
+    python preprocessing.py
+
+    echo "Data pipeline completed."
 else
     echo "Database already seeded (contains $TABLE_COUNT records). Skipping seed."
 fi
