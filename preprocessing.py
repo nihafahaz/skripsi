@@ -33,6 +33,9 @@ def bersihkan_harga(nilai):
     """Membersihkan nilai harga dari karakter non-numerik."""
     if pd.isna(nilai):
         return None
+        
+    if isinstance(nilai, (int, float, np.integer, np.floating)):
+        return float(nilai)
 
     nilai = str(nilai).strip()
 
@@ -47,31 +50,42 @@ def bersihkan_harga(nilai):
 
 def interpolasi_missing_value(data, provinsi, jenis):
     """
-    Mengisi missing value menggunakan interpolasi.
-    Mengacu pada skripsi_lstm.ipynb:
-    - Default: spline order 3
-    - Fallback: linear limit_direction='both'
-    - Khusus Gorontalo + Cabai Rawit Hijau: langsung linear
+    Mengisi missing value menggunakan metode gabungan:
+    - Bagian dalam (inside): Spline order 3 (jika gagal, fallback ke Linear)
+    - Bagian luar/ujung (outside): Linear / bfill / ffill untuk mencegah lonjakan
     """
+    # 1. Dapatkan indeks baris yang tidak NaN
+    non_nan_indices = data[data["harga"].notna()].index
 
-    if (provinsi, jenis) == ("Gorontalo", "Cabai Rawit Hijau"):
-        data["harga"] = data["harga"].interpolate(
-            method="linear",
-            limit_direction="both"
-        )
-    else:
+    if len(non_nan_indices) < 2:
+        # Jika data riil terlalu sedikit untuk spline, gunakan linear saja
+        data["harga"] = data["harga"].interpolate(method="linear", limit_direction="both")
+        data["harga"] = data["harga"].bfill().ffill()
+        return data
+
+    first_idx = non_nan_indices[0]
+    last_idx = non_nan_indices[-1]
+
+    # Ambil bagian dalam (inside)
+    inside_series = data.loc[first_idx:last_idx, "harga"]
+
+    if inside_series.isna().any():
+        # Lakukan spline interpolation untuk bagian dalam saja
         try:
-            data["harga"] = data["harga"].interpolate(
-                method="spline",
-                order=3
-            )
+            # Duplikat untuk backup
+            original_inside = inside_series.copy()
+            # Spline order 3
+            interpolated_inside = original_inside.interpolate(method="spline", order=3)
+            # Validasi spline (tidak boleh negatif atau ekstrem > 500rb)
+            if (interpolated_inside < 0).any() or (interpolated_inside > 500000).any() or interpolated_inside.isna().any():
+                raise ValueError("Spline inside range yielded invalid/out-of-range values")
+            data.loc[first_idx:last_idx, "harga"] = interpolated_inside
         except Exception:
-            data["harga"] = data["harga"].interpolate(
-                method="linear",
-                limit_direction="both"
-            )
+            # Fallback jika spline bagian dalam gagal
+            data.loc[first_idx:last_idx, "harga"] = original_inside.interpolate(method="linear")
 
-    # Isi sisa NaN di ujung data
+    # 2. Lakukan linear interpolation untuk bagian luar (bfill dan ffill di ujung-ujung)
+    data["harga"] = data["harga"].interpolate(method="linear", limit_direction="both")
     data["harga"] = data["harga"].bfill().ffill()
 
     return data

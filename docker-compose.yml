@@ -58,6 +58,10 @@ services:
     build: ./scraper
     container_name: pihps_scraper
     restart: "no" # Jalankan sekali lalu keluar
+    security_opt:
+      - seccomp:unconfined
+    shm_size: '2gb'
+    privileged: true
     environment:
       DB_HOST: "mysql"
       DB_USER: "root"
