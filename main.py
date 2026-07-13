@@ -150,6 +150,22 @@ def proses_prediksi(request: PredictRequest):
 
         data_historis = list(reversed(data_historis))
 
+        # --- LOGIKA BACKUP LOCF UNTUK AKHIR PEKAN / HARI LIBUR ---
+        # Jika hari ini adalah Sabtu/Minggu (atau hari libur) dan data belum terupdate di PIHPS BI,
+        # gunakan harga hari kerja terakhir (Last Observation Carried Forward) untuk mengisi gap harian.
+        hari_ini = datetime.now().date()
+        tanggal_terakhir_db = data_historis[-1]["tanggal"]
+        if 0 < (hari_ini - tanggal_terakhir_db).days <= 7:
+            while tanggal_terakhir_db < hari_ini:
+                tanggal_terakhir_db = tanggal_terakhir_db + timedelta(days=1)
+                new_record = {
+                    "tanggal": tanggal_terakhir_db,
+                    "harga": data_historis[-1]["harga"]
+                }
+                data_historis.append(new_record)
+                if len(data_historis) > LAG:
+                    data_historis.pop(0)
+
         tanggal_terakhir = data_historis[-1]["tanggal"]
         harga_terakhir = data_historis[-1]["harga"]
 
