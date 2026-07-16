@@ -10,10 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import joblib
 from database import get_db_connection
-
-# =========================================================
-# KONFIGURASI
-# =========================================================
+from preprocessing import interpolasi_missing_value, bersihkan_harga
 
 PROVINSI_LIST = sorted([
     'Aceh', 'Bali', 'Banten', 'Bengkulu', 'DI Yogyakarta', 'DKI Jakarta',
@@ -96,109 +93,127 @@ def main():
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
 
-    # =====================================================
-    # AMBIL SEMUA DATA HARGA UNTUK FIT SCALER GLOBAL
-    # =====================================================
-    print("[*] Mengambil semua data harga untuk fitting Scaler Global...")
-    cursor.execute("SELECT harga FROM data_harga_clean WHERE harga IS NOT NULL")
-    all_prices_rows = cursor.fetchall()
-    all_prices = np.array([float(r["harga"]) for r in all_prices_rows]).reshape(-1, 1)
-
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaler.fit(all_prices)
-    joblib.dump(scaler, "scalers/global_scaler.save")
-    print("[+] Scaler Global berhasil disimpan.")
-
-    train_X_list, train_y_list = [], []
-    test_X_list, test_y_list = [], []
-
-    # =====================================================
-    # BANGUN DATASET PER SERIES DENGAN ONE-HOT ENCODING
-    # =====================================================
-    print("[*] Memproses dataset time-series dengan fitur One-Hot Encoding...")
+    # 1. Tahap 1: Pengambilan Data Mentah, Splitting, dan Imputasi
+    print("[*] Tahap 1: Mengambil, membagi (Train/Test), dan membersihkan data per kombinasi dari database...")
+    series_data_list = []
+    all_train_prices = []
 
     for prov_idx, provinsi in enumerate(PROVINSI_LIST):
         for chili_idx, jenis in enumerate(JENIS_CABAI_LIST):
-
+            # Mengambil data dari database tanpa filter harga IS NOT NULL
+            # untuk mendapatkan data mentah dengan kemungkinan missing values
             cursor.execute(
                 """
                 SELECT tanggal, harga
                 FROM data_harga_clean
                 WHERE provinsi = %s AND jenis_cabai = %s
-                AND harga IS NOT NULL
                 ORDER BY tanggal ASC
                 """,
                 (provinsi, jenis)
             )
-
             rows = cursor.fetchall()
-            if len(rows) < 10:
+            if len(rows) < (LAG + 10):
                 continue
 
             data = pd.DataFrame(rows)
             data["tanggal"] = pd.to_datetime(data["tanggal"])
             data = data.sort_values("tanggal").reset_index(drop=True)
 
-            # Transform harga menggunakan Scaler Global
-            harga_series = data["harga"].values.reshape(-1, 1).astype(float)
-            scaled_series = scaler.transform(harga_series)
+            # Bersihkan harga format
+            data["harga"] = data["harga"].apply(bersihkan_harga)
 
-            # Ubah ke supervised format lag-1
-            reframed = series_to_supervised(scaled_series, LAG, 1)
-            values = reframed.values
+            # Split Train/Test (80:20) secara temporal sebelum interpolasi dan scaling
+            n_train = int(len(data) * SPLIT_RATIO)
+            train_df = data.iloc[:n_train].copy().reset_index(drop=True)
+            test_df = data.iloc[n_train:].copy().reset_index(drop=True)
 
-            # Split Train/Test (80:20) per series
-            n_train = int(len(reframed) * SPLIT_RATIO)
-            train, test = values[:n_train, :], values[n_train:, :]
+            # Lakukan interpolasi secara mandiri pada masing-masing split untuk mencegah leakage
+            train_df = interpolasi_missing_value(train_df, provinsi, jenis)
+            test_df = interpolasi_missing_value(test_df, provinsi, jenis)
 
-            # Pisahkan feature (x) dan target (y)
-            # x_raw adalah scaled_price pada (t-1)
-            train_x_raw, train_y = train[:, :-1], train[:, -1]
-            test_x_raw, test_y = test[:, :-1], test[:, -1]
+            # Bulatkan harga setelah interpolasi ke 100 terdekat
+            train_df["harga"] = (train_df["harga"] / 100).round() * 100
+            test_df["harga"] = (test_df["harga"] / 100).round() * 100
 
-            # Buat one-hot encoding array untuk Provinsi dan Jenis Cabai
-            prov_ohe = np.zeros(NUM_PROVINSI)
-            prov_ohe[prov_idx] = 1.0
+            # Kumpulkan semua harga training untuk fit scaler global
+            all_train_prices.extend(train_df["harga"].values)
 
-            chili_ohe = np.zeros(NUM_JENIS)
-            chili_ohe[chili_idx] = 1.0
-
-            ohe_features = np.concatenate([prov_ohe, chili_ohe])  # Panjang 38
-
-            # Tambahkan OHE features ke setiap baris data
-            # train_x_raw shape: (samples, 1)
-            train_ohe = np.tile(ohe_features, (len(train_x_raw), 1))
-            test_ohe = np.tile(ohe_features, (len(test_x_raw), 1))
-
-            train_X = np.hstack([train_x_raw, train_ohe])  # Shape: (samples, 39)
-            test_X = np.hstack([test_x_raw, test_ohe])    # Shape: (samples, 39)
-
-            train_X_list.append(train_X)
-            train_y_list.append(train_y)
-            test_X_list.append(test_X)
-            test_y_list.append(test_y)
+            # Simpan data mentah ter-imputasi untuk diproses di Tahap 2 setelah scaler terbentuk
+            series_data_list.append((train_df, test_df, prov_idx, chili_idx))
 
     cursor.close()
     connection.close()
 
-    # Gabungkan semua data dari seluruh daerah
+    # 2. Tahap 2: Fitting Global Scaler menggunakan HANYA data train
+    print("[*] Tahap 2: Fitting MinMaxScaler Global menggunakan hanya data Train...")
+    all_train_prices = np.array(all_train_prices).reshape(-1, 1).astype(float)
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaler.fit(all_train_prices)
+    joblib.dump(scaler, "scalers/global_scaler.save")
+    print("[+] Scaler Global berhasil di-fit dan disimpan.")
+
+    # 3. Tahap 3: Penskalaan, Pembuatan Supervised Lags
+    print("[*] Tahap 3: Pemrosesan scaling, supervised lags")
+    train_X_list, train_y_list = [], []
+    test_X_list, test_y_list = [], []
+
+    for train_df, test_df, prov_idx, chili_idx in series_data_list:
+        # Scale data harga menggunakan global scaler yang di-fit di atas
+        train_prices = train_df["harga"].values.reshape(-1, 1).astype(float)
+        test_prices = test_df["harga"].values.reshape(-1, 1).astype(float)
+
+        scaled_train = scaler.transform(train_prices)
+        scaled_test = scaler.transform(test_prices)
+
+        # Ubah ke supervised format lags sekuensial (Opsi B)
+        # Train set
+        reframed_train = series_to_supervised(scaled_train, LAG, 1)
+        train_values = reframed_train.values
+        train_x_raw, train_y = train_values[:, :-1], train_values[:, -1]
+
+        # Test set (gabungkan dengan LAG terakhir dari train agar tidak memotong awal test set)
+        test_input_seq = np.concatenate([scaled_train[-LAG:], scaled_test], axis=0)
+        reframed_test = series_to_supervised(test_input_seq, LAG, 1)
+        test_values = reframed_test.values
+        test_x_raw, test_y = test_values[:, :-1], test_values[:, -1]
+
+        # Reshape data x_raw menjadi 3D: [samples, LAG, 1]
+        train_x_3d = train_x_raw.reshape((train_x_raw.shape[0], LAG, 1))
+        test_x_3d = test_x_raw.reshape((test_x_raw.shape[0], LAG, 1))
+
+        # Buat One-Hot Encoding array (panjang 38)
+        prov_ohe = np.zeros(NUM_PROVINSI)
+        prov_ohe[prov_idx] = 1.0
+
+        chili_ohe = np.zeros(NUM_JENIS)
+        chili_ohe[chili_idx] = 1.0
+
+        ohe_features = np.concatenate([prov_ohe, chili_ohe]) # Panjang 38
+
+        # Tile/Duplikasi OHE features sebanyak samples dan LAG -> shape: [samples, LAG, 38]
+        train_ohe = np.tile(ohe_features, (len(train_x_3d), LAG, 1))
+        test_ohe = np.tile(ohe_features, (len(test_x_3d), LAG, 1))
+
+        # Gabungkan fitur harga dan OHE di dimensi fitur (axis=2) -> shape: [samples, LAG, 39]
+        train_X = np.concatenate([train_x_3d, train_ohe], axis=2)
+        test_X = np.concatenate([test_x_3d, test_ohe], axis=2)
+
+        train_X_list.append(train_X)
+        train_y_list.append(train_y)
+        test_X_list.append(test_X)
+        test_y_list.append(test_y)
+
+    # Gabungkan semua data
     final_train_X = np.concatenate(train_X_list, axis=0)
     final_train_y = np.concatenate(train_y_list, axis=0)
     final_test_X = np.concatenate(test_X_list, axis=0)
     final_test_y = np.concatenate(test_y_list, axis=0)
 
-    # Reshape untuk input LSTM: [samples, time steps, features]
-    # Time steps = 1, Features = 39
-    final_train_X = final_train_X.reshape((final_train_X.shape[0], 1, final_train_X.shape[1]))
-    final_test_X = final_test_X.reshape((final_test_X.shape[0], 1, final_test_X.shape[1]))
-
     print(f"[+] Total data train: {final_train_X.shape[0]} baris")
     print(f"[+] Total data test: {final_test_X.shape[0]} baris")
-    print(f"[+] Jumlah fitur input: {final_train_X.shape[2]}")
+    print(f"[+] Shape train input: {final_train_X.shape}") # (samples, 7, 39)
+    print(f"[+] Shape test input: {final_test_X.shape}")   # (samples, 7, 39)
 
-    # =====================================================
-    # TRAINING MODEL LSTM GLOBAL TUNGGAL
-    # =====================================================
     run_name = "Run_Model_LSTM_Global"
 
     with mlflow.start_run(run_name=run_name) as run:
@@ -228,9 +243,6 @@ def main():
             shuffle=False
         )
 
-        # =====================================================
-        # EVALUASI GLOBAL
-        # =====================================================
         print("[*] Mengevaluasi performa model...")
         yhat = model.predict(final_test_X)
         yhat = np.clip(yhat, 0, 1)

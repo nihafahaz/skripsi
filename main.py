@@ -93,7 +93,8 @@ def harga(
     
 def buat_model_lstm():
     model = Sequential()
-    model.add(LSTM(32, input_shape=(1, LAG + 38)))
+    model.add(Input(shape=(LAG, 39)))
+    model.add(LSTM(32, return_sequences=False))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(loss="mse", optimizer="adam")
     return model
@@ -188,9 +189,11 @@ def proses_prediksi(request: PredictRequest):
         ohe_features = np.concatenate([prov_ohe, chili_ohe])
 
         # Bentuk initial feature vector size (1, 1, LAG + 38)
-        current_seq_features = np.zeros((1, 1, LAG + len(ohe_features)))
-        current_seq_features[0, 0, :LAG] = scaled_sequence.flatten()
-        current_seq_features[0, 0, LAG:] = ohe_features
+        # Bentuk initial feature vector size (1, LAG, 1 + len(ohe_features))
+        current_seq_features = np.zeros((1, LAG, 1 + len(ohe_features)))
+        for t in range(LAG):
+            current_seq_features[0, t, 0] = scaled_sequence[t, 0]
+            current_seq_features[0, t, 1:] = ohe_features
 
         hasil_prediksi = []
 
@@ -208,10 +211,14 @@ def proses_prediksi(request: PredictRequest):
             })
 
             # Update feature vector untuk prediksi hari berikutnya (sliding window)
-            next_seq_features = np.zeros((1, 1, LAG + len(ohe_features)))
-            next_seq_features[0, 0, :LAG-1] = current_seq_features[0, 0, 1:LAG]
-            next_seq_features[0, 0, LAG-1] = pred_scaled[0][0]
-            next_seq_features[0, 0, LAG:] = ohe_features
+            next_seq_features = np.zeros((1, LAG, 1 + len(ohe_features)))
+            # Geser harga historis ke kiri (t=0..LAG-2 diisi dengan t=1..LAG-1 dari current_seq_features)
+            next_seq_features[0, :LAG-1, 0] = current_seq_features[0, 1:, 0]
+            # Hari terakhir (t=LAG-1) diisi dengan hasil prediksi hari ini
+            next_seq_features[0, -1, 0] = pred_scaled[0][0]
+            # OHE tetap sama di semua timestep
+            for t in range(LAG):
+                next_seq_features[0, t, 1:] = ohe_features
             current_seq_features = next_seq_features
 
         return {

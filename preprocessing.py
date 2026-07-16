@@ -70,23 +70,19 @@ def interpolasi_missing_value(data, provinsi, jenis):
     inside_series = data.loc[first_idx:last_idx, "harga"]
 
     if inside_series.isna().any():
-        # Khusus Gorontalo + Cabai Rawit Hijau langsung menggunakan Linear Interpolation sesuai deskripsi skripsi
-        if (provinsi, jenis) == ("Gorontalo", "Cabai Rawit Hijau"):
-            data.loc[first_idx:last_idx, "harga"] = inside_series.interpolate(method="linear")
-        else:
-            # Lakukan spline interpolation untuk bagian dalam saja
-            try:
-                # Duplikat untuk backup
-                original_inside = inside_series.copy()
-                # Spline order 3
-                interpolated_inside = original_inside.interpolate(method="spline", order=3)
-                # Validasi spline (tidak boleh negatif atau ekstrem > 500rb)
-                if (interpolated_inside < 0).any() or (interpolated_inside > 500000).any() or interpolated_inside.isna().any():
-                    raise ValueError("Spline inside range yielded invalid/out-of-range values")
-                data.loc[first_idx:last_idx, "harga"] = interpolated_inside
-            except Exception:
-                # Fallback jika spline bagian dalam gagal
-                data.loc[first_idx:last_idx, "harga"] = original_inside.interpolate(method="linear")
+        # Lakukan spline interpolation untuk bagian dalam saja
+        try:
+            # Duplikat untuk backup
+            original_inside = inside_series.copy()
+            # Spline order 3
+            interpolated_inside = original_inside.interpolate(method="spline", order=3)
+            # Validasi spline (tidak boleh negatif atau ekstrem > 500rb)
+            if (interpolated_inside < 0).any() or (interpolated_inside > 500000).any() or interpolated_inside.isna().any():
+                raise ValueError("Spline inside range yielded invalid/out-of-range values")
+            data.loc[first_idx:last_idx, "harga"] = interpolated_inside
+        except Exception:
+            # Fallback jika spline bagian dalam gagal
+            data.loc[first_idx:last_idx, "harga"] = original_inside.interpolate(method="linear")
 
     # 2. Lakukan linear interpolation untuk bagian luar (bfill dan ffill di ujung-ujung)
     data["harga"] = data["harga"].interpolate(method="linear", limit_direction="both")
