@@ -1,18 +1,19 @@
 #!/bin/sh
 
 # Tunggu sampai MySQL siap
-echo "Waiting for MySQL database on ${DB_HOST:-mysql}:3306..."
-while ! nc -z ${DB_HOST:-mysql} 3306; do
+echo "Waiting for MySQL on ${DB_HOST}:${DB_PORT:-3306}..."
+while ! nc -z ${DB_HOST} ${DB_PORT:-3306}; do
   sleep 1
 done
-echo "MySQL is up and running!"
+echo "MySQL is up!"
 
 # Cek apakah tabel data_harga_clean kosong
 TABLE_COUNT=$(python -c "
 import os, pymysql
 try:
     conn = pymysql.connect(
-        host=os.getenv('DB_HOST', 'mysql'),
+        host=os.getenv('DB_HOST', 'localhost'),
+        port=int(os.getenv('DB_PORT', 3306)),
         user=os.getenv('DB_USER', 'root'),
         password=os.getenv('DB_PASSWORD', ''),
         database=os.getenv('DB_NAME', 'db_cabai')
@@ -22,29 +23,24 @@ try:
     count = cursor.fetchone()[0]
     conn.close()
     print(count)
-except Exception as e:
+except Exception:
     print(0)
 ")
 
 if [ "$TABLE_COUNT" -eq "0" ]; then
-    echo "Database is empty. Running database seeding..."
-    python import_clean_to_mysql.py
-    python import_toko.py
-    echo "Database seeding completed."
+    echo "Database kosong. Menjalankan seeding pipeline..."
 
-    # Generate data sintesis untuk kombinasi provinsi/jenis cabai yang kosong
-    echo "Running data synthesis for empty combinations..."
-    python data_synthesis.py
+    echo "[1/3] Seeding toko online..."
+    python scripts/seed_stores.py
 
-    # Preprocessing: interpolasi missing value, pembulatan, simpan ke clean_data
-    echo "Running preprocessing pipeline..."
-    python preprocessing.py
+    echo "[2/3] Generating data sintetis untuk kombinasi kosong..."
+    python scripts/synthesize_data.py
 
-    echo "Data pipeline completed."
+    echo "Seeding selesai."
 else
-    echo "Database already seeded (contains $TABLE_COUNT records). Skipping seed."
+    echo "Database sudah terisi ($TABLE_COUNT records). Skip seeding."
 fi
 
 # Jalankan FastAPI server
-echo "Starting FastAPI server..."
-exec uvicorn main:app --host 0.0.0.0 --port 8000
+echo "Menjalankan FastAPI server..."
+exec "$@"
