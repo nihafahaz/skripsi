@@ -24,4 +24,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run the scraper script
-CMD ["python", "scraper.py"]
+CMD ["python", "main.py"]
+
