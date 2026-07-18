@@ -30,10 +30,13 @@ except Exception:
 if [ "$TABLE_COUNT" -eq "0" ]; then
     echo "Database kosong. Menjalankan seeding pipeline..."
 
-    echo "[1/3] Seeding toko online..."
-    python scripts/seed_stores.py
+    echo "[1/3] Seeding data historis harga cabai dari clean_data..."
+    python scripts/seed_database.py --data-dir clean_data --truncate
 
-    echo "[2/3] Generating data sintetis untuk kombinasi kosong..."
+    echo "[2/3] Seeding toko online dari data_toko_online.xlsx..."
+    python scripts/seed_stores.py --file data_toko_online.xlsx
+
+    echo "[3/3] Generating data sintetis untuk kombinasi kosong (jika ada)..."
     python scripts/synthesize_data.py
 
     echo "Seeding selesai."

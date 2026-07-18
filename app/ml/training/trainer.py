@@ -80,6 +80,26 @@ def _fetch_series_data(cursor) -> list[tuple]:
             train_df = data.iloc[:n_train].copy().reset_index(drop=True)
             test_df = data.iloc[n_train:].copy().reset_index(drop=True)
 
+            # --- SIMPAN SPLIT DATA MENTAH SEBELUM PREPROCESSING ---
+            split_dir = "split"
+            os.makedirs(split_dir, exist_ok=True)
+            
+            # Format nama file: split/DKI_Jakarta_Cabai_Rawit_Merah_train.xlsx
+            sanitized_prov = provinsi.replace(" ", "_")
+            sanitized_jenis = jenis.replace(" ", "_")
+            train_split_path = os.path.join(split_dir, f"{sanitized_prov}_{sanitized_jenis}_train.xlsx")
+            test_split_path = os.path.join(split_dir, f"{sanitized_prov}_{sanitized_jenis}_test.xlsx")
+
+            # Ubah datetime ke string date untuk kemudahan Excel
+            train_excel = train_df.copy()
+            train_excel["tanggal"] = train_excel["tanggal"].dt.date
+            test_excel = test_df.copy()
+            test_excel["tanggal"] = test_excel["tanggal"].dt.date
+
+            train_excel.to_excel(train_split_path, index=False)
+            test_excel.to_excel(test_split_path, index=False)
+
+            # --- LANJUTKAN PREPROCESSING (INTERPOLASI & PEMBULATAN) ---
             label = f"{provinsi} / {jenis}"
             train_df = interpolate_missing(train_df, label=f"{label} [train]")
             test_df = interpolate_missing(test_df, label=f"{label} [test]")
