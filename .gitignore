@@ -1,0 +1,27 @@
+# Ignore environment variables file
+.env
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# MLflow files & database
+mlflow.db
+mlflow-artifacts/
+mlruns/
+
+# Excel & PNG files in root (generated files)
+*.xlsx
+*.png
+clean_data/
+laporan_pdf/
+split/
+models/*.weights.h5
+scalers/*.save
