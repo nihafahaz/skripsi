@@ -1,7 +1,10 @@
 import pandas as pd
 import pymysql
-
 import os
+from dotenv import load_dotenv
+
+# Load file .env
+load_dotenv()
 
 # =========================
 # KONFIGURASI
@@ -13,6 +16,7 @@ db_config = {
     "user": os.getenv("DB_USER", "root"),
     "password": os.getenv("DB_PASSWORD", ""),
     "database": os.getenv("DB_NAME", "db_cabai"),
+    "port": int(os.getenv("DB_PORT", 3306)),
     "charset": "utf8mb4"
 }
 

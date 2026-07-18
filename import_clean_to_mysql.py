@@ -1,6 +1,10 @@
 import os
 import pandas as pd
 from sqlalchemy import create_engine
+from dotenv import load_dotenv
+
+# Load file .env
+load_dotenv()
 
 # folder tempat file clean kamu
 folder_clean = "clean_data"
@@ -10,8 +14,9 @@ db_host = os.getenv("DB_HOST", "localhost")
 db_user = os.getenv("DB_USER", "root")
 db_pass = os.getenv("DB_PASSWORD", "")
 db_name = os.getenv("DB_NAME", "db_cabai")
+db_port = os.getenv("DB_PORT", "3306")
 
-engine = create_engine(f"mysql+pymysql://{db_user}:{db_pass}@{db_host}/{db_name}")
+engine = create_engine(f"mysql+pymysql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}")
 
 with engine.begin() as conn:
     conn.exec_driver_sql("TRUNCATE TABLE data_harga_clean")

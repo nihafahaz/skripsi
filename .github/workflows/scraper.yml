@@ -1,0 +1,40 @@
+name: Daily PIHPS Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Berjalan otomatis setiap jam 07:00 WIB (00:00 UTC)
+  workflow_dispatch:      # Mengaktifkan tombol manual trigger di halaman GitHub Actions
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies for Chrome/Selenium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium chromium-driver
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r scraper/requirements.txt
+
+      - name: Run Scraper
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          CHROME_BIN: /usr/bin/chromium
+          CHROMEDRIVER_PATH: /usr/bin/chromedriver
+        run: |
+          python scraper/scraper.py
