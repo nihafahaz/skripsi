@@ -1,7 +1,21 @@
+# Scraper core
 selenium>=4.0.0
 beautifulsoup4
+lxml
+
+# Data handling
 pandas
-pymysql
 openpyxl
 requests
-lxml
+
+# Database
+pymysql>=1.1.0
+
+# Diperlukan oleh app.core.config (pydantic-settings)
+pydantic-settings>=2.2.0
+
+# Diperlukan oleh app.core.exceptions (fastapi)
+fastapi>=0.111.0
+
+# Scheduler otomatis harian
+schedule>=1.2.0

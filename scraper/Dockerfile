@@ -18,11 +18,22 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Install HANYA dependency yang dibutuhkan scraper (tanpa TensorFlow, dll)
+COPY scraper/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy HANYA subdirektori yang dibutuhkan scraper dari app/
+# (menghindari app/__init__.py yang import seluruh FastAPI router + ML deps)
+RUN mkdir -p ./app/core ./app/utils ./app/db
+COPY app/core/ ./app/core/
+COPY app/utils/ ./app/utils/
+# Hanya session.py dari app/db (bukan repositories/ yang ada ML imports)
+COPY app/db/session.py ./app/db/session.py
+# Buat __init__.py kosong agar Python mengenali package-nya
+RUN touch ./app/__init__.py ./app/db/__init__.py
 
-# Run the scraper script
-CMD ["python", "main.py"]
+# Copy modul scraper/
+COPY scraper/ ./scraper/
 
+# Default: jalankan scraper sekali (untuk docker compose run --rm scraper)
+CMD ["python", "scraper/main.py"]

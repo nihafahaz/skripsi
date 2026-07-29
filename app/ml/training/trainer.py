@@ -209,7 +209,8 @@ def run_training() -> None:
 
         early_stopping = EarlyStopping(
             monitor="val_loss",
-            patience=25,
+            patience=settings.early_stopping_patience,
+            min_delta=settings.early_stopping_min_delta,
             restore_best_weights=True,
         )
 
@@ -241,6 +242,8 @@ def run_training() -> None:
         mlflow.log_param("split_ratio", settings.split_ratio)
         mlflow.log_param("epochs", settings.epochs)
         mlflow.log_param("batch_size", settings.batch_size)
+        mlflow.log_param("early_stopping_patience", settings.early_stopping_patience)
+        mlflow.log_param("early_stopping_min_delta", settings.early_stopping_min_delta)
         mlflow.log_param("total_features", final_train_x.shape[2])
 
         mlflow.log_metric("final_train_loss_mse", final_loss)

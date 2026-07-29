@@ -47,17 +47,21 @@ services:
       MLFLOW_TRACKING_URI: "http://mlflow:5000"
     volumes:
       - shared_data:/shared
+      - ./main.py:/app/main.py
+      - ./app:/app/app
       - ./models:/app/models
       - ./scalers:/app/scalers
     depends_on:
       mysql:
         condition: service_healthy
 
-  # 4. BI PIHPS Scraper
+  # 4. BI PIHPS Scraper (jalankan manual: docker compose run --rm scraper)
   scraper:
-    build: ./scraper
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
     container_name: pihps_scraper
-    restart: "no" # Jalankan sekali lalu keluar
+    restart: "no"
     security_opt:
       - seccomp:unconfined
     shm_size: '2gb'
@@ -73,6 +77,56 @@ services:
       mysql:
         condition: service_healthy
       backend:
+        condition: service_started
+
+  # 5. BI PIHPS Scraper Scheduler (otomatis setiap hari 06:00 WIB)
+  scraper-scheduler:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    container_name: pihps_scraper_scheduler
+    restart: always
+    command: ["python", "scraper/scheduler.py"]
+    security_opt:
+      - seccomp:unconfined
+    shm_size: '2gb'
+    privileged: true
+    environment:
+      DB_HOST: "mysql"
+      DB_USER: "root"
+      DB_PASSWORD: ""
+      DB_NAME: "db_cabai"
+    volumes:
+      - shared_data:/shared
+    depends_on:
+      mysql:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # 6. Training Scheduler (otomatis setiap Minggu 02:00 WIB)
+  trainer-scheduler:
+    build: .
+    container_name: lstm_trainer_scheduler
+    restart: always
+    command: ["python", "scripts/train_scheduler.py"]
+    environment:
+      DB_HOST: "mysql"
+      DB_USER: "root"
+      DB_PASSWORD: ""
+      DB_NAME: "db_cabai"
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+      TRAIN_ON_STARTUP: "false"   # set "true" untuk training langsung saat container start
+    volumes:
+      - ./models:/app/models       # weights disimpan langsung ke folder models
+      - ./scalers:/app/scalers     # scaler disimpan langsung ke folder scalers
+      - mlflow_data:/mlflow
+    depends_on:
+      mysql:
+        condition: service_healthy
+      backend:
+        condition: service_started
+      mlflow:
         condition: service_started
 
 volumes:

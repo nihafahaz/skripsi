@@ -48,9 +48,11 @@ class Settings(BaseSettings):
 
     # --- Training hyperparameters ---
     lstm_units: int = 32
-    epochs: int = 150
+    epochs: int = 150          # sesuai eksperimen terbaik
     batch_size: int = 32
-    split_ratio: float = 0.8
+    split_ratio: float = 0.7   # 70:30 → hasil terbaik dari eksperimen
+    early_stopping_patience: int = 20
+    early_stopping_min_delta: float = 0.0001
 
     # --- Data synthesis ---
     synthesis_max_rows: int = 800

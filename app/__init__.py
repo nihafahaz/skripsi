@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
             "API Backend Prediksi Harga Cabai menggunakan model LSTM Global. "
             "Mendukung 34 provinsi dan 4 jenis komoditas cabai."
         ),
+        docs_url=None,
         lifespan=_lifespan,
     )
 
